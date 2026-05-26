@@ -1,16 +1,62 @@
-# React + Vite
+# 🛒 SmartStock - Control Inteligente de Inventario por Voz
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+![SmartStock Banner](https://img.shields.io/badge/SmartStock-PWA-blue)
+![React](https://img.shields.io/badge/React-19-blue)
+![Firebase](https://img.shields.io/badge/Firebase-Realtime-orange)
+![Groq](https://img.shields.io/badge/Groq-Llama%203.3-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 📖 Descripción
 
-## React Compiler
+**SmartStock** es una aplicación web progresiva (**PWA**) diseñada para supermercados, autoservicios, almacenes y centros de distribución que necesitan agilizar el registro y control de productos mediante comandos de voz.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Su objetivo principal es reducir el tiempo que los repositores dedican a registrar lotes y vencimientos, eliminando la carga manual de datos y permitiendo que toda la operación se sincronice en tiempo real entre múltiples dispositivos.
 
-## Expanding the ESLint configuration
+La aplicación escucha instrucciones habladas, interpreta lenguaje natural utilizando Inteligencia Artificial y transforma automáticamente la información en registros estructurados dentro del inventario.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+---
+
+## 🎯 Problema que Resuelve
+
+En muchos supermercados los repositores deben:
+
+- Leer manualmente productos.
+- Registrar lotes.
+- Registrar fechas de vencimiento.
+- Informar productos próximos a vencer.
+- Coordinar información entre varios empleados.
+
+Esto genera:
+
+- Pérdida de tiempo.
+- Errores humanos.
+- Productos vencidos en góndola.
+- Falta de sincronización entre equipos.
+
+SmartStock automatiza todo este proceso.
+
+---
+
+# ✨ Características Principales
+
+## 🎙️ Registro por Voz
+
+Permite registrar productos utilizando lenguaje natural.
+
+### Ejemplo
+
+Usuario:
+
+> "Leche Serenísima lote 4587 vence el 12 de agosto del 2027"
+
+Resultado:
+
+```json
+{
+  "producto": "Leche Serenísima",
+  "lote": "4587",
+  "vencimiento": "2027-08-12"
+}
+```
