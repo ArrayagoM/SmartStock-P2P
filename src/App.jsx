@@ -83,31 +83,45 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  // --- PEDIR PERMISO NOTIFICACIONES ---
+  // --- PEDIR PERMISO NOTIFICACIONES CON PRECAUCIÓN ---
   useEffect(() => {
-    if ('Notification' in window) {
-      if (Notification.permission === 'granted') {
-        setNotificationsEnabled(true);
+    try {
+      // Envolvemos en un try/catch porque algunos WebView en Android lanzan error al acceder a Notification
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        if (Notification.permission === 'granted') {
+          setNotificationsEnabled(true);
+        }
       }
+    } catch (e) {
+      console.warn('API de Notificaciones no accesible en este navegador/dispositivo', e);
     }
   }, []);
 
   const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      setLastAction({ type: 'error', msg: 'Notificaciones no soportadas.' });
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      setNotificationsEnabled(true);
-      setLastAction({ type: 'success', msg: 'Notificaciones activadas.' });
-      new Notification('SmartStock', { body: 'Las notificaciones están funcionando.' });
+    try {
+      if (!('Notification' in window)) {
+        setLastAction({ type: 'error', msg: 'Notificaciones no soportadas.' });
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        setNotificationsEnabled(true);
+        setLastAction({ type: 'success', msg: 'Notificaciones activadas.' });
+        new Notification('SmartStock', { body: 'Las notificaciones están funcionando.' });
+      }
+    } catch (e) {
+      console.error('Error pidiendo permiso:', e);
+      setLastAction({ type: 'error', msg: 'No se pudo activar notificaciones.' });
     }
   };
 
   const triggerNotification = (title, body) => {
-    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/favicon.ico' });
+    try {
+      if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, { body, icon: '/favicon.ico' });
+      }
+    } catch (e) {
+      // Prevención silenciosa de fallos
     }
   };
 
@@ -138,7 +152,6 @@ export default function App() {
     currentAlerts.sort((a, b) => a.days - b.days);
     setAlerts(currentAlerts);
 
-    // Si hay productos recién vencidos detectados y las notificaciones están activas (Podría optimizarse para no spamear)
     if (hasNewExpirations && currentAlerts.length > 0) {
        triggerNotification('¡Alerta de Inventario!', `Tienes ${currentAlerts.filter(a => a.status === 'vencido').length} productos vencidos.`);
     }
@@ -148,7 +161,6 @@ export default function App() {
   const saveProduct = async (dataToSave) => {
     if (!user) return;
     
-    // Si estamos editando, usamos el ID original, si no, generamos uno nuevo.
     const docId = dataToSave.id || dataToSave.producto.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now().toString().slice(-4);
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', docId);
 
@@ -182,30 +194,35 @@ export default function App() {
     }
   };
 
-  // --- CONFIGURACIÓN DE VOZ ---
+  // --- CONFIGURACIÓN DE VOZ SEGURA ---
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'es-AR';
-      recognition.continuous = true;
-      recognition.interimResults = true;
+    try {
+      // Se envuelve en try/catch para evitar crash de React en Android si la API tira un error al inicializar
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'es-AR';
+        recognition.continuous = true;
+        recognition.interimResults = true;
 
-      recognition.onresult = (event) => {
-        let current = '';
-        for (let i = 0; i < event.results.length; i++) {
-          current += event.results[i][0].transcript;
-        }
-        setTranscript(current);
-        transcriptRef.current = current;
-      };
+        recognition.onresult = (event) => {
+          let current = '';
+          for (let i = 0; i < event.results.length; i++) {
+            current += event.results[i][0].transcript;
+          }
+          setTranscript(current);
+          transcriptRef.current = current;
+        };
 
-      recognitionRef.current = recognition;
+        recognitionRef.current = recognition;
+      }
+    } catch (e) {
+      console.warn('SpeechRecognition no está totalmente soportado o fue bloqueado en este dispositivo Android', e);
     }
   }, []);
 
   const handlePointerDown = (e) => {
-    e.preventDefault();
+    // IMPORTANTE: Se eliminó e.preventDefault() porque en navegadores Android lanza una violación de listener pasivo que causa errores.
     if (!recognitionRef.current) {
       setLastAction({ type: 'error', msg: 'Micrófono no compatible aquí.' });
       return;
@@ -218,7 +235,6 @@ export default function App() {
   };
 
   const handlePointerUp = async (e) => {
-    e.preventDefault();
     if (!isListening) return;
     setIsListening(false);
     try { recognitionRef.current.stop(); } catch (e) {}
@@ -293,7 +309,8 @@ export default function App() {
   );
 
   return (
-    <div className="w-full h-[100dvh] max-w-md mx-auto bg-slate-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-[2rem] sm:h-[850px] sm:my-8 border sm:border-slate-800 select-none">
+    // CAMBIO CSS: Se agregó 'h-screen' como fallback antes del 'min-h-[100dvh]' para soportar navegadores móviles más viejos
+    <div className="w-full h-screen min-h-[100dvh] max-w-md mx-auto bg-slate-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-[2rem] sm:h-[850px] sm:min-h-0 sm:my-8 border sm:border-slate-800 select-none">
       
       {/* HEADER */}
       <header className="bg-slate-900 text-white p-4 flex flex-col gap-3 shadow-md z-10 rounded-b-3xl shrink-0">
@@ -353,7 +370,7 @@ export default function App() {
       </div>
 
       {/* FEED DE DATOS PRINCIPAL */}
-      <main className="flex-1 overflow-y-auto p-4 pb-32"> {/* pb-32 para que el FAB no tape el último elemento */}
+      <main className="flex-1 overflow-y-auto p-4 pb-32">
         
         {/* ALERTAS */}
         {alerts.length > 0 && !searchTerm && (
