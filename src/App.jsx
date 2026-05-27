@@ -1,44 +1,96 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Mic, PackageSearch, Save, RefreshCw, AlertTriangle, Wifi, 
-  Smartphone, Search, Edit2, Trash2, X, Bell 
+import {
+  Mic,
+  PackageSearch,
+  Save,
+  RefreshCw,
+  AlertTriangle,
+  Wifi,
+  Smartphone,
+  Search,
+  Edit2,
+  Trash2,
+  X,
+  Bell,
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import {
+  getAuth,
+  signInAnonymously,
+  signInWithCustomToken,
+  onAuthStateChanged,
+} from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
-// CONFIGURACIÓN DE FIREBASE (Adaptada para compatibilidad global, reemplaza con tus datos en tu entorno local)
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: 'AIzaSyBzjAt4rnCPhfyzf3aEKjUkNFjwnlDeKUM',
-      authDomain: 'smartstock-p2p.firebaseapp.com',
-      projectId: 'smartstock-p2p',
-      storageBucket: 'smartstock-p2p.firebasestorage.app',
-      messagingSenderId: '874526242396',
-      appId: '1:874526242396:web:a297a2d9f0b7c54fb6d899',
-    };
+// 1. ESCUDO DE ERRORES (ERROR BOUNDARY)
+// Esto evitará la pantalla blanca y nos mostrará qué falló exactamente si el teléfono no soporta algo.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('Error capturado por Boundary:', error, errorInfo);
+    this.setState({ errorInfo });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 bg-red-50 text-red-900 p-6 overflow-auto font-mono text-xs w-full flex flex-col gap-4">
+          <h1 className="text-xl font-black text-red-700 uppercase">⚠️ Error del Sistema</h1>
+          <p className="font-bold text-sm">El navegador de este teléfono bloqueó una función:</p>
+          <div className="bg-red-100 p-3 rounded-lg border border-red-200">
+            {this.state.error && this.state.error.toString()}
+          </div>
+          <p className="opacity-70 mt-4">Pásale una captura de esta pantalla al desarrollador.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// CONFIGURACIÓN DE FIREBASE
+const firebaseConfig =
+  typeof __firebase_config !== 'undefined'
+    ? JSON.parse(__firebase_config)
+    : {
+        apiKey: 'AIzaSyBzjAt4rnCPhfyzf3aEKjUkNFjwnlDeKUM',
+        authDomain: 'smartstock-p2p.firebaseapp.com',
+        projectId: 'smartstock-p2p',
+        storageBucket: 'smartstock-p2p.firebasestorage.app',
+        messagingSenderId: '874526242396',
+        appId: '1:874526242396:web:a297a2d9f0b7c54fb6d899',
+      };
+
+// Inicialización segura (evita crash si el WebView bloquea IndexedDB)
+let app, auth, db;
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (e) {
+  console.error('Error crítico iniciando Firebase:', e);
+}
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'smartstock-p2p-app';
 
-export default function App() {
+// 2. APLICACIÓN PRINCIPAL
+function MainApp() {
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState('Conectando...');
   const [inventory, setInventory] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Estados de IA y Voz
+
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const transcriptRef = useRef('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastAction, setLastAction] = useState(null);
-  
-  // Estados UI y Edición
+
   const [editingItem, setEditingItem] = useState(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
@@ -46,6 +98,10 @@ export default function App() {
 
   // --- FIREBASE INIT ---
   useEffect(() => {
+    if (!auth) {
+      setStatus('Error de Sistema (Auth)');
+      return;
+    }
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -69,82 +125,95 @@ export default function App() {
 
   // --- FIREBASE SUBSCRIPTION ---
   useEffect(() => {
-    if (!user) return;
+    if (!user || !db) return;
     const inventoryRef = collection(db, 'artifacts', appId, 'public', 'data', 'inventory');
-    
-    const unsub = onSnapshot(inventoryRef, (snap) => {
-      const items = [];
-      snap.forEach((d) => items.push({ id: d.id, ...d.data() }));
-      items.sort((a, b) => b.updatedAt - a.updatedAt);
-      setInventory(items);
-      updateAlerts(items);
-    }, (err) => console.error('Firestore error:', err));
-    
+
+    const unsub = onSnapshot(
+      inventoryRef,
+      (snap) => {
+        const items = [];
+        snap.forEach((d) => items.push({ id: d.id, ...d.data() }));
+        items.sort((a, b) => b.updatedAt - a.updatedAt);
+        setInventory(items);
+        updateAlerts(items);
+      },
+      (err) => {
+        console.error('Firestore error:', err);
+        setStatus('Error BD');
+      },
+    );
+
     return () => unsub();
   }, [user]);
 
-  // --- PEDIR PERMISO NOTIFICACIONES CON PRECAUCIÓN ---
+  // --- NOTIFICACIONES 100% SEGURAS (Previene ReferenceError) ---
   useEffect(() => {
     try {
-      // Envolvemos en un try/catch porque algunos WebView en Android lanzan error al acceder a Notification
-      if (typeof window !== 'undefined' && 'Notification' in window) {
-        if (Notification.permission === 'granted') {
+      // Uso estricto de window.Notification en lugar de Notification global
+      if (typeof window !== 'undefined' && window.Notification) {
+        if (window.Notification.permission === 'granted') {
           setNotificationsEnabled(true);
         }
       }
     } catch (e) {
-      console.warn('API de Notificaciones no accesible en este navegador/dispositivo', e);
+      console.warn('API de Notificaciones bloqueada en este dispositivo', e);
     }
   }, []);
 
   const requestNotificationPermission = async () => {
     try {
-      if (!('Notification' in window)) {
-        setLastAction({ type: 'error', msg: 'Notificaciones no soportadas.' });
+      if (!window.Notification) {
+        setLastAction({ type: 'error', msg: 'Tu teléfono no admite esto.' });
         return;
       }
-      const permission = await Notification.requestPermission();
+      const permission = await window.Notification.requestPermission();
       if (permission === 'granted') {
         setNotificationsEnabled(true);
         setLastAction({ type: 'success', msg: 'Notificaciones activadas.' });
-        new Notification('SmartStock', { body: 'Las notificaciones están funcionando.' });
+        new window.Notification('SmartStock', { body: 'Las notificaciones funcionan.' });
+      } else {
+        setLastAction({ type: 'error', msg: 'Permiso denegado.' });
       }
     } catch (e) {
       console.error('Error pidiendo permiso:', e);
-      setLastAction({ type: 'error', msg: 'No se pudo activar notificaciones.' });
+      setLastAction({ type: 'error', msg: 'Falló al activar.' });
     }
   };
 
   const triggerNotification = (title, body) => {
     try {
-      if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, { body, icon: '/favicon.ico' });
+      if (
+        notificationsEnabled &&
+        window.Notification &&
+        window.Notification.permission === 'granted'
+      ) {
+        new window.Notification(title, { body, icon: '/favicon.ico' });
       }
-    } catch (e) {
-      // Prevención silenciosa de fallos
-    }
+    } catch (e) {}
   };
 
-  // --- LÓGICA DE ALERTAS ---
+  // --- ALERTAS ---
   const updateAlerts = (currentInventory) => {
     const currentAlerts = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     let hasNewExpirations = false;
 
     currentInventory.forEach((item) => {
       if (item.vencimiento && item.vencimiento !== 'N/A') {
         const expDate = new Date(item.vencimiento);
-        expDate.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        if (!isNaN(expDate.getTime())) {
+          // Protege contra fechas inválidas en Android viejos
+          expDate.setHours(0, 0, 0, 0);
+          const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-        if (diffDays < 0) {
-          currentAlerts.push({ ...item, status: 'vencido', days: Math.abs(diffDays) });
-          hasNewExpirations = true;
-        }
-        else if (diffDays <= 30) {
-          currentAlerts.push({ ...item, status: 'proximo', days: diffDays });
+          if (diffDays < 0) {
+            currentAlerts.push({ ...item, status: 'vencido', days: Math.abs(diffDays) });
+            hasNewExpirations = true;
+          } else if (diffDays <= 30) {
+            currentAlerts.push({ ...item, status: 'proximo', days: diffDays });
+          }
         }
       }
     });
@@ -153,26 +222,40 @@ export default function App() {
     setAlerts(currentAlerts);
 
     if (hasNewExpirations && currentAlerts.length > 0) {
-       triggerNotification('¡Alerta de Inventario!', `Tienes ${currentAlerts.filter(a => a.status === 'vencido').length} productos vencidos.`);
+      triggerNotification(
+        '¡Alerta de Inventario!',
+        `Tienes ${currentAlerts.filter((a) => a.status === 'vencido').length} productos vencidos.`,
+      );
     }
   };
 
-  // --- CRUD MANEJO DE DATOS ---
+  // --- CRUD ---
   const saveProduct = async (dataToSave) => {
-    if (!user) return;
-    
-    const docId = dataToSave.id || dataToSave.producto.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now().toString().slice(-4);
+    if (!user || !db) return;
+
+    const docId =
+      dataToSave.id ||
+      dataToSave.producto.toLowerCase().replace(/\s+/g, '-') +
+        '-' +
+        Date.now().toString().slice(-4);
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', docId);
 
     try {
-      await setDoc(docRef, {
-        nombre: (dataToSave.producto || dataToSave.nombre).toUpperCase(),
-        lote: dataToSave.lote || 'N/A',
-        vencimiento: dataToSave.vencimiento || 'N/A',
-        updatedAt: Date.now(),
-      }, { merge: true });
+      await setDoc(
+        docRef,
+        {
+          nombre: (dataToSave.producto || dataToSave.nombre).toUpperCase(),
+          lote: dataToSave.lote || 'N/A',
+          vencimiento: dataToSave.vencimiento || 'N/A',
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
 
-      setLastAction({ type: 'success', msg: `¡Guardado! ${dataToSave.producto || dataToSave.nombre}` });
+      setLastAction({
+        type: 'success',
+        msg: `¡Guardado! ${dataToSave.producto || dataToSave.nombre}`,
+      });
       setEditingItem(null);
       setTimeout(() => setLastAction(null), 3000);
     } catch (error) {
@@ -182,7 +265,7 @@ export default function App() {
   };
 
   const deleteProduct = async (id) => {
-    if (!user) return;
+    if (!user || !db) return;
     if (window.confirm('¿Eliminar este producto?')) {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id));
@@ -194,10 +277,9 @@ export default function App() {
     }
   };
 
-  // --- CONFIGURACIÓN DE VOZ SEGURA ---
+  // --- VOZ SEGURA ---
   useEffect(() => {
     try {
-      // Se envuelve en try/catch para evitar crash de React en Android si la API tira un error al inicializar
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
@@ -213,31 +295,33 @@ export default function App() {
           setTranscript(current);
           transcriptRef.current = current;
         };
-
         recognitionRef.current = recognition;
       }
     } catch (e) {
-      console.warn('SpeechRecognition no está totalmente soportado o fue bloqueado en este dispositivo Android', e);
+      console.warn('Voz no soportada', e);
     }
   }, []);
 
   const handlePointerDown = (e) => {
-    // IMPORTANTE: Se eliminó e.preventDefault() porque en navegadores Android lanza una violación de listener pasivo que causa errores.
     if (!recognitionRef.current) {
-      setLastAction({ type: 'error', msg: 'Micrófono no compatible aquí.' });
+      setLastAction({ type: 'error', msg: 'Micrófono bloqueado o no compatible.' });
       return;
     }
     setTranscript('');
     transcriptRef.current = '';
     setLastAction(null);
     setIsListening(true);
-    try { recognitionRef.current.start(); } catch (e) {}
+    try {
+      recognitionRef.current.start();
+    } catch (e) {}
   };
 
   const handlePointerUp = async (e) => {
     if (!isListening) return;
     setIsListening(false);
-    try { recognitionRef.current.stop(); } catch (e) {}
+    try {
+      recognitionRef.current.stop();
+    } catch (e) {}
 
     const finalTexto = transcriptRef.current.trim();
     if (finalTexto.length > 0) {
@@ -245,29 +329,20 @@ export default function App() {
     }
   };
 
-  // --- INTELIGENCIA ARTIFICIAL ---
+  // --- IA ---
   const processTextWithAI = async (text) => {
     setIsProcessing(true);
-    const apiKey = 'gsk_94o2r3BDEdAs' + 'zvHjbmg4WGdyb3F' + 'YbYGnVJ3EXSyPvu' + 'ixScpLljBL'; // Mantenida como solicitaste
+    const apiKey = 'gsk_94o2r3BDEdAs' + 'zvHjbmg4WGdyb3F' + 'YbYGnVJ3EXSyPvu' + 'ixScpLljBL';
 
     try {
       const prompt = `
-        Eres un asistente de logística experto. Extrae los datos de inventario del texto del usuario.
-        
-        REGLAS CRÍTICAS DE FECHAS (El año actual es 2026):
-        - Si el usuario dice "1/26", "1 del 26", o "enero 26", significa Enero del año 2026.
-        - Si el usuario dice "12/28", significa Diciembre de 2028.
-        - Un año de 2 dígitos (ej: 26, 27) SIEMPRE asume que es la década de 2000 (2026, 2027).
-        - Formato de SALIDA: YYYY-MM-DD. Si no se especifica el día exacto, usa SIEMPRE el último día de ese mes (ej: "2026-01-31").
-        - Interpreta desorden. Si dice "lote 123 vencimiento 1/26 paracetamol", asocia bien los campos.
-
-        Responde SOLO JSON con estas propiedades exactas:
-        - "producto" (String)
-        - "lote" (String)
-        - "vencimiento" (String, en formato YYYY-MM-DD, o "N/A")
-        - "valido" (Boolean, true si detectaste claramente un producto)
-        
-        Texto a procesar: "${text}"
+        Eres un asistente de logística experto. Extrae datos del texto.
+        REGLAS DE FECHAS (Año actual: 2026):
+        - "1/26", "enero 26" -> Enero 2026.
+        - Año de 2 dígitos (26, 27) asume década 2000 (2026, 2027).
+        - SALIDA YYYY-MM-DD. Si no hay día, usa último día del mes ("2026-01-31").
+        Responde SOLO JSON con: "producto" (String), "lote" (String), "vencimiento" (String, YYYY-MM-DD o "N/A"), "valido" (Boolean).
+        Texto: "${text}"
       `;
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -291,10 +366,10 @@ export default function App() {
         await saveProduct(result);
         triggerNotification('Producto Agregado', `${result.producto} (Lote: ${result.lote})`);
       } else {
-        setLastAction({ type: 'error', msg: 'No se entendió. Intenta de nuevo.' });
+        setLastAction({ type: 'error', msg: 'No se entendió bien.' });
       }
     } catch (error) {
-      setLastAction({ type: 'error', msg: 'Error procesando IA.' });
+      setLastAction({ type: 'error', msg: 'Error de red o IA.' });
     } finally {
       setIsProcessing(false);
       setTranscript('');
@@ -302,16 +377,16 @@ export default function App() {
     }
   };
 
-  // Filtrado de inventario
-  const filteredInventory = inventory.filter(item => 
-    item.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    item.lote.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredInventory = inventory.filter(
+    (item) =>
+      item.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.lote.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
-    // CAMBIO CSS: Se agregó 'h-screen' como fallback antes del 'min-h-[100dvh]' para soportar navegadores móviles más viejos
-    <div className="w-full h-screen min-h-[100dvh] max-w-md mx-auto bg-slate-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-[2rem] sm:h-[850px] sm:min-h-0 sm:my-8 border sm:border-slate-800 select-none">
-      
+    // CAMBIO DE CSS CRÍTICO PARA ANDROID:
+    // Se usa 'fixed inset-0' para obligar a que ocupe toda la pantalla sin depender de cálculos de altura (h-screen/dvh)
+    <div className="fixed inset-0 sm:relative sm:inset-auto w-full sm:h-[850px] max-w-md mx-auto bg-slate-50 flex flex-col shadow-2xl sm:rounded-[2rem] sm:my-8 border sm:border-slate-800 select-none overflow-hidden">
       {/* HEADER */}
       <header className="bg-slate-900 text-white p-4 flex flex-col gap-3 shadow-md z-10 rounded-b-3xl shrink-0">
         <div className="flex justify-between items-center">
@@ -320,15 +395,24 @@ export default function App() {
             <h1 className="text-lg font-black tracking-tight">SmartStock P2P</h1>
           </div>
           <div className="flex gap-2">
-            <button 
+            <button
               onClick={requestNotificationPermission}
-              className={`p-1.5 rounded-full ${notificationsEnabled ? 'text-green-400 bg-slate-800' : 'text-slate-400 bg-slate-800'}`}
+              className={`p-1.5 rounded-full transition-colors ${notificationsEnabled ? 'text-green-400 bg-slate-800' : 'text-slate-400 bg-slate-800 hover:bg-slate-700'}`}
               title="Activar Notificaciones"
             >
               <Bell size={16} />
             </button>
             <div className="flex items-center gap-1.5 text-xs font-bold bg-slate-800 px-3 py-1.5 rounded-full">
-              <Wifi size={14} className={status === 'Conectando...' ? 'text-yellow-400 animate-pulse' : 'text-green-400'} />
+              <Wifi
+                size={14}
+                className={
+                  status === 'Conectando...'
+                    ? 'text-yellow-400 animate-pulse'
+                    : status.includes('Error')
+                      ? 'text-red-400'
+                      : 'text-green-400'
+                }
+              />
               <span className="uppercase tracking-wider hidden xs:block">{status}</span>
             </div>
           </div>
@@ -337,9 +421,9 @@ export default function App() {
         {/* BUSCADOR */}
         <div className="relative">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input 
-            type="text" 
-            placeholder="Buscar por producto o lote..." 
+          <input
+            type="text"
+            placeholder="Buscar producto o lote..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-800 text-white placeholder-slate-400 text-sm rounded-xl py-2.5 pl-10 pr-4 outline-none border border-slate-700 focus:border-blue-500 transition-colors"
@@ -347,22 +431,26 @@ export default function App() {
         </div>
       </header>
 
-      {/* ÁREA DE MENSAJES DE ESTADO */}
+      {/* ÁREA DE MENSAJES */}
       <div className="px-4 pt-3 shrink-0 empty:hidden">
         {isListening && (
-           <div className="bg-blue-100 text-blue-800 p-3 rounded-xl text-sm font-medium animate-pulse shadow-sm border border-blue-200">
-             🎙️ "{transcript || 'Escuchando...'}"
-           </div>
+          <div className="bg-blue-100 text-blue-800 p-3 rounded-xl text-sm font-medium animate-pulse shadow-sm border border-blue-200">
+            🎙️ "{transcript || 'Escuchando...'}"
+          </div>
         )}
         {isProcessing && (
           <div className="bg-blue-50 text-blue-700 p-3 rounded-xl flex items-center gap-2 text-sm font-bold shadow-sm border border-blue-100">
-            <RefreshCw size={18} className="animate-spin" /> Procesando con IA...
+            <RefreshCw size={18} className="animate-spin" /> Procesando...
           </div>
         )}
         {lastAction && !isProcessing && !isListening && (
-          <div className={`p-3 rounded-xl flex items-center gap-2 text-sm font-bold shadow-sm border ${
-            lastAction.type === 'success' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-red-50 text-red-800 border-red-200'
-          }`}>
+          <div
+            className={`p-3 rounded-xl flex items-center gap-2 text-sm font-bold shadow-sm border ${
+              lastAction.type === 'success'
+                ? 'bg-green-50 text-green-800 border-green-200'
+                : 'bg-red-50 text-red-800 border-red-200'
+            }`}
+          >
             {lastAction.type === 'success' ? <Save size={18} /> : <AlertTriangle size={18} />}
             {lastAction.msg}
           </div>
@@ -371,7 +459,6 @@ export default function App() {
 
       {/* FEED DE DATOS PRINCIPAL */}
       <main className="flex-1 overflow-y-auto p-4 pb-32">
-        
         {/* ALERTAS */}
         {alerts.length > 0 && !searchTerm && (
           <div className="mb-6">
@@ -380,14 +467,21 @@ export default function App() {
             </h2>
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
               {alerts.map((alert) => (
-                <div key={`alert-${alert.id}`} className="min-w-[200px] snap-start bg-red-50 p-3 rounded-2xl border border-red-100 flex flex-col shadow-sm">
+                <div
+                  key={`alert-${alert.id}`}
+                  className="min-w-[200px] snap-start bg-red-50 p-3 rounded-2xl border border-red-100 flex flex-col shadow-sm"
+                >
                   <div className="flex justify-between items-start mb-1">
-                     <h3 className="font-bold text-slate-800 text-sm leading-tight truncate pr-2">{alert.nombre}</h3>
-                     <span className="text-[10px] font-black px-1.5 py-0.5 bg-red-600 text-white rounded shadow-sm whitespace-nowrap">
+                    <h3 className="font-bold text-slate-800 text-sm leading-tight truncate pr-2">
+                      {alert.nombre}
+                    </h3>
+                    <span className="text-[10px] font-black px-1.5 py-0.5 bg-red-600 text-white rounded shadow-sm whitespace-nowrap">
                       {alert.status === 'vencido' ? 'VENCIDO' : `${alert.days}D`}
                     </span>
                   </div>
-                  <span className="text-xs text-slate-500">Lote: {alert.lote} | V: {alert.vencimiento}</span>
+                  <span className="text-xs text-slate-500">
+                    Lote: {alert.lote} | V: {alert.vencimiento}
+                  </span>
                 </div>
               ))}
             </div>
@@ -397,9 +491,9 @@ export default function App() {
         {/* INVENTARIO */}
         <div>
           <h2 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3 pl-1">
-            {searchTerm ? 'Resultados' : 'Inventario Reciente'}
+            {searchTerm ? 'Resultados' : 'Inventario'}
           </h2>
-          
+
           {filteredInventory.length === 0 ? (
             <div className="text-center py-10 opacity-50">
               <PackageSearch size={40} className="mx-auto text-slate-400 mb-2" />
@@ -408,23 +502,38 @@ export default function App() {
           ) : (
             <div className="space-y-3">
               {filteredInventory.map((item) => (
-                <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center group">
+                <div
+                  key={item.id}
+                  className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center group"
+                >
                   <div className="flex-1 min-w-0 pr-4">
                     <h3 className="font-bold text-slate-700 text-sm truncate">{item.nombre}</h3>
                     <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs mt-1">
-                      <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium">L: {item.lote}</span>
-                      <span className={`px-2 py-0.5 rounded-md font-bold ${
-                          alerts.some((a) => a.id === item.id) ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                        }`}>
+                      <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium">
+                        L: {item.lote}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md font-bold ${
+                          alerts.some((a) => a.id === item.id)
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-green-100 text-green-700'
+                        }`}
+                      >
                         V: {item.vencimiento}
                       </span>
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    <button onClick={() => setEditingItem(item)} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 rounded-full transition-colors">
+                    <button
+                      onClick={() => setEditingItem(item)}
+                      className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 rounded-full transition-colors"
+                    >
                       <Edit2 size={16} />
                     </button>
-                    <button onClick={() => deleteProduct(item.id)} className="p-2 text-slate-400 hover:text-red-600 bg-slate-50 rounded-full transition-colors">
+                    <button
+                      onClick={() => deleteProduct(item.id)}
+                      className="p-2 text-slate-400 hover:text-red-600 bg-slate-50 rounded-full transition-colors"
+                    >
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -435,7 +544,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* BOTÓN FLOTANTE DE MICRÓFONO (FAB) */}
+      {/* FAB: MICRÓFONO */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center z-20">
         <div className="relative">
           {isListening && (
@@ -458,50 +567,80 @@ export default function App() {
         </span>
       </div>
 
-      {/* MODAL DE EDICIÓN MANUAL */}
+      {/* MODAL EDICIÓN */}
       {editingItem && (
         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm shadow-2xl relative animate-in fade-in zoom-in duration-200">
-            <button 
-              onClick={() => setEditingItem(null)} 
+          <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm shadow-2xl relative">
+            <button
+              onClick={() => setEditingItem(null)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 bg-slate-100 rounded-full"
             >
               <X size={18} />
             </button>
             <h3 className="text-lg font-black text-slate-800 mb-4">Editar Producto</h3>
-            
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.target);
-              saveProduct({
-                id: editingItem.id,
-                producto: formData.get('nombre'),
-                lote: formData.get('lote'),
-                vencimiento: formData.get('vencimiento')
-              });
-            }} className="space-y-4">
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                saveProduct({
+                  id: editingItem.id,
+                  producto: formData.get('nombre'),
+                  lote: formData.get('lote'),
+                  vencimiento: formData.get('vencimiento'),
+                });
+              }}
+              className="space-y-4"
+            >
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Nombre del Producto</label>
-                <input name="nombre" defaultValue={editingItem.nombre} required className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
+                <label className="block text-xs font-bold text-slate-500 mb-1">
+                  Nombre del Producto
+                </label>
+                <input
+                  name="nombre"
+                  defaultValue={editingItem.nombre}
+                  required
+                  className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Lote</label>
-                  <input name="lote" defaultValue={editingItem.lote} className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-blue-500 outline-none" />
+                  <input
+                    name="lote"
+                    defaultValue={editingItem.lote}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Vencimiento</label>
-                  <input type="date" name="vencimiento" defaultValue={editingItem.vencimiento !== 'N/A' ? editingItem.vencimiento : ''} className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-blue-500 outline-none" />
+                  <input
+                    type="date"
+                    name="vencimiento"
+                    defaultValue={editingItem.vencimiento !== 'N/A' ? editingItem.vencimiento : ''}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none"
+                  />
                 </div>
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl mt-2 flex justify-center items-center gap-2 transition-colors">
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl mt-2 flex justify-center items-center gap-2"
+              >
                 <Save size={18} /> Guardar Cambios
               </button>
             </form>
           </div>
         </div>
       )}
-
     </div>
+  );
+}
+
+// 3. EXPORTACIÓN ENVUELTA EN EL BOUNDARY
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
   );
 }
